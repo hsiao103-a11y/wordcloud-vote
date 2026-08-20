@@ -4,10 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GitHub Pages 免費雲端文字雲投票</title>
-    <!-- 引入 PeerJS (即時連線)、WordCloud2 (文字雲) -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.2/src/wordcloud2.min.js"></script>
-    <!-- [修正] 確保 QRCode 庫正確引入 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
         body { font-family: "Microsoft JhengHei", Arial, sans-serif; max-width: 900px; margin: 20px auto; padding: 20px; background: #f4f6f9; }
@@ -15,26 +13,26 @@
         .flex { display: flex; gap: 20px; }
         .qr-card { text-align: center; min-width: 200px; }
         .vote-btn { display: block; width: 100%; padding: 15px; margin: 10px 0; font-size: 18px; color: white; background: #007bff; border: none; border-radius: 8px; cursor: pointer; }
+        .vote-btn:active { background: #0056b3; }
         #canvas-container { width: 100%; height: 400px; background: #fff; border: 1px solid #ddd; }
-        .tag { display: inline-block; background: #e9ecef; padding: 5px 10px; border-radius: 15px; margin: 4px; border: 1px solid #ccc; cursor: default; }
+        .tag { display: inline-block; background: #e9ecef; padding: 5px 10px; border-radius: 15px; margin: 4px; border: 1px solid #ccc; }
     </style>
 </head>
 <body>
 
-    <!-- 判斷是「電腦大螢幕(Host)」還是「手機投票(Guest)」 -->
+    <!-- 電腦大螢幕端 -->
     <div id="host-view">
         <div class="flex">
             <div class="card qr-card">
                 <h3>📱 掃碼投票</h3>
-                <!-- [修正] 這裡是用來放置 QR Code 的容器 -->
-                <div id="qrcode" style="display:flex; justify-content:center; align-items:center; min-height:160px; border:1px solid #eee; background:#fafafa;"></div>
+                <div id="qrcode" style="display:flex; justify-content:center; align-items:center; min-height:160px;"></div>
             </div>
             <div class="card" style="flex:1;">
                 <h3>⚙️ 選項管理</h3>
-                <input type="text" id="new-opt" placeholder="輸入新選項" style="padding:5px;">
-                <button onclick="addOption()" style="padding:5px 10px;">新增</button>
-                <button onclick="resetVotes()" style="color:red; margin-left:10px; padding:5px 10px;">重置票數</button>
-                <div id="options-list" style="margin-top: 10px;"></div>
+                <input type="text" id="new-opt" placeholder="輸入新選項" style="padding:6px;">
+                <button onclick="addOption()" style="padding:6px 12px;">新增選項</button>
+                <button onclick="resetVotes()" style="color:red; margin-left:10px; padding:6px 12px;">重置票數</button>
+                <div id="options-list" style="margin-top: 12px;"></div>
             </div>
         </div>
         <div class="card">
@@ -45,8 +43,10 @@
         </div>
     </div>
 
+    <!-- 手機投票端 -->
     <div id="guest-view" style="display:none;" class="card">
         <h2>請選擇一項進行投票</h2>
+        <div id="status-msg" style="color: #666; font-size: 14px; margin-bottom: 10px;">連線中...</div>
         <div id="vote-buttons"></div>
     </div>
 
@@ -54,47 +54,56 @@
         const urlParams = new URLSearchParams(window.location.search);
         const hostId = urlParams.get('host');
 
-        // 資料狀態
+        // 預設資料
         let options = ["台灣", "日本", "韓國"];
         let votes = {"台灣": 0, "日本": 0, "韓國": 0};
 
         if (!hostId) {
-            // === 主控台模式 (電腦大螢幕) ===
+            // === 電腦端邏輯 ===
+            const connectedConns = [];
             const peer = new Peer();
 
             peer.on('open', (id) => {
                 const voteUrl = `${window.location.origin}${window.location.pathname}?host=${id}`;
-                // [修正] 清空容器並重新生成 QR Code
                 const qrContainer = document.getElementById("qrcode");
                 qrContainer.innerHTML = '';
                 new QRCode(qrContainer, { text: voteUrl, width: 160, height: 160 });
-                console.log('PeerID 已開啟，QR Code 已生成：', voteUrl);
                 renderCloud();
             });
 
-            // 監聽手機連線與投票
             peer.on('connection', (conn) => {
+                connectedConns.push(conn);
+
+                // 連線建立時立刻發送目前資料
                 conn.on('open', () => {
-                    conn.send({ type: 'INIT', options });
+                    conn.send({ type: 'INIT', options: options });
                 });
+
+                // 接收手機發送的訊息
                 conn.on('data', (data) => {
-                    if (data.type === 'VOTE' && votes[data.option] !== undefined) {
+                    if (data.type === 'REQ_INIT') {
+                        conn.send({ type: 'INIT', options: options });
+                    } else if (data.type === 'VOTE' && votes[data.option] !== undefined) {
                         votes[data.option]++;
                         renderCloud();
                     }
                 });
             });
 
+            function broadcastOptions() {
+                connectedConns.forEach(conn => {
+                    if (conn.open) conn.send({ type: 'INIT', options: options });
+                });
+            }
+
             function renderCloud() {
-                // 更新選項目錄
                 document.getElementById('options-list').innerHTML = options.map(opt => 
                     `<span class="tag">${opt} (${votes[opt]||0}票)</span>`
                 ).join('');
 
-                // 繪製文字雲 (增加權重讓放大效果更明顯)
-                const cloudData = options.map(opt => [opt, (votes[opt] || 0) * 10 + 15]);
+                const cloudData = options.map(opt => [opt, (votes[opt] || 0) * 15 + 15]);
                 WordCloud(document.getElementById('cloud-canvas'), {
-                    list: cloudData, gridSize: 10, weightFactor: 2, color: 'random-dark', rotateRatio: 0.2
+                    list: cloudData, gridSize: 8, weightFactor: 1, color: 'random-dark', rotateRatio: 0.2
                 });
             }
 
@@ -105,6 +114,7 @@
                     votes[val] = 0;
                     document.getElementById('new-opt').value = '';
                     renderCloud();
+                    broadcastOptions(); // 同步給已連線的手機
                 }
             }
 
@@ -116,29 +126,54 @@
             }
 
         } else {
-            // === 投票頁面模式 (手機端) ===
+            // === 手機端邏輯 ===
             document.getElementById('host-view').style.display = 'none';
             document.getElementById('guest-view').style.display = 'block';
+
+            const statusEl = document.getElementById('status-msg');
+            const container = document.getElementById('vote-buttons');
+            
+            // 手機預設先顯示預設選項（防止網路慢時一片空白）
+            renderButtons(options);
 
             const peer = new Peer();
             let conn = null;
 
             peer.on('open', () => {
                 conn = peer.connect(hostId);
+
+                conn.on('open', () => {
+                    statusEl.innerText = "🟢 已成功連線至主控台";
+                    statusEl.style.color = "green";
+                    // 主動向電腦索取最新的選項列表
+                    conn.send({ type: 'REQ_INIT' });
+                });
+
                 conn.on('data', (data) => {
-                    if (data.type === 'INIT') {
-                        const container = document.getElementById('vote-buttons');
-                        container.innerHTML = data.options.map(opt => 
-                            `<button class="vote-btn" onclick="castVote('${opt}')">${opt}</button>`
-                        ).join('');
+                    if (data.type === 'INIT' && Array.isArray(data.options)) {
+                        options = data.options;
+                        renderButtons(options);
                     }
+                });
+
+                conn.on('error', () => {
+                    statusEl.innerText = "🔴 連線異常，請重新掃碼";
+                    statusEl.style.color = "red";
                 });
             });
 
+            function renderButtons(opts) {
+                container.innerHTML = opts.map(opt => 
+                    `<button class="vote-btn" onclick="castVote('${opt}')">${opt}</button>`
+                ).join('');
+            }
+
             function castVote(opt) {
-                if (conn) {
+                if (conn && conn.open) {
                     conn.send({ type: 'VOTE', option: opt });
                     alert(`已成功投給「${opt}」！`);
+                } else {
+                    alert('目前未成功連接到電腦主控台，請確認電腦網頁是否保持開啟！');
                 }
             }
         }
