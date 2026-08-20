@@ -4,18 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GitHub Pages 免費雲端文字雲投票</title>
-    <!-- 引入 PeerJS (即時連線)、WordCloud2 (文字雲)、QRCode (生成條碼) -->
+    <!-- 引入 PeerJS (即時連線)、WordCloud2 (文字雲) -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.2/src/wordcloud2.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/org/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- [修正] 確保 QRCode 庫正確引入 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; padding: 20px; background: #f4f6f9; }
+        body { font-family: "Microsoft JhengHei", Arial, sans-serif; max-width: 900px; margin: 20px auto; padding: 20px; background: #f4f6f9; }
         .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; }
         .flex { display: flex; gap: 20px; }
         .qr-card { text-align: center; min-width: 200px; }
         .vote-btn { display: block; width: 100%; padding: 15px; margin: 10px 0; font-size: 18px; color: white; background: #007bff; border: none; border-radius: 8px; cursor: pointer; }
         #canvas-container { width: 100%; height: 400px; background: #fff; border: 1px solid #ddd; }
-        .tag { display: inline-block; background: #e9ecef; padding: 5px 10px; border-radius: 15px; margin: 4px; }
+        .tag { display: inline-block; background: #e9ecef; padding: 5px 10px; border-radius: 15px; margin: 4px; border: 1px solid #ccc; cursor: default; }
     </style>
 </head>
 <body>
@@ -25,13 +26,14 @@
         <div class="flex">
             <div class="card qr-card">
                 <h3>📱 掃碼投票</h3>
-                <div id="qrcode" style="display:flex; justify-content:center;"></div>
+                <!-- [修正] 這裡是用來放置 QR Code 的容器 -->
+                <div id="qrcode" style="display:flex; justify-content:center; align-items:center; min-height:160px; border:1px solid #eee; background:#fafafa;"></div>
             </div>
             <div class="card" style="flex:1;">
                 <h3>⚙️ 選項管理</h3>
-                <input type="text" id="new-opt" placeholder="輸入新選項">
-                <button onclick="addOption()">新增</button>
-                <button onclick="resetVotes()" style="color:red; margin-left:10px;">重置票數</button>
+                <input type="text" id="new-opt" placeholder="輸入新選項" style="padding:5px;">
+                <button onclick="addOption()" style="padding:5px 10px;">新增</button>
+                <button onclick="resetVotes()" style="color:red; margin-left:10px; padding:5px 10px;">重置票數</button>
                 <div id="options-list" style="margin-top: 10px;"></div>
             </div>
         </div>
@@ -62,7 +64,12 @@
 
             peer.on('open', (id) => {
                 const voteUrl = `${window.location.origin}${window.location.pathname}?host=${id}`;
-                new QRCode(document.getElementById("qrcode"), { text: voteUrl, width: 160, height: 160 });
+                // [修正] 清空容器並重新生成 QR Code
+                const qrContainer = document.getElementById("qrcode");
+                qrContainer.innerHTML = '';
+                new QRCode(qrContainer, { text: voteUrl, width: 160, height: 160 });
+                console.log('PeerID 已開啟，QR Code 已生成：', voteUrl);
+                renderCloud();
             });
 
             // 監聽手機連線與投票
@@ -84,10 +91,10 @@
                     `<span class="tag">${opt} (${votes[opt]||0}票)</span>`
                 ).join('');
 
-                // 繪製文字雲
-                const cloudData = options.map(opt => [opt, (votes[opt] || 0) * 15 + 15]);
+                // 繪製文字雲 (增加權重讓放大效果更明顯)
+                const cloudData = options.map(opt => [opt, (votes[opt] || 0) * 10 + 15]);
                 WordCloud(document.getElementById('cloud-canvas'), {
-                    list: cloudData, gridSize: 8, weightFactor: 1, color: 'random-dark', rotateRatio: 0.2
+                    list: cloudData, gridSize: 10, weightFactor: 2, color: 'random-dark', rotateRatio: 0.2
                 });
             }
 
@@ -102,11 +109,11 @@
             }
 
             function resetVotes() {
-                options.forEach(o => votes[o] = 0);
-                renderCloud();
+                if (confirm('確定要重置所有票數嗎？')) {
+                    options.forEach(o => votes[o] = 0);
+                    renderCloud();
+                }
             }
-
-            window.onload = renderCloud;
 
         } else {
             // === 投票頁面模式 (手機端) ===
