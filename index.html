@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Pages 免費雲端文字雲投票</title>
+    <!-- 引入 PeerJS (即時連線)、WordCloud2 (文字雲)、QRCode (生成條碼) -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.2/src/wordcloud2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/org/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; padding: 20px; background: #f4f6f9; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .flex { display: flex; gap: 20px; }
+        .qr-card { text-align: center; min-width: 200px; }
+        .vote-btn { display: block; width: 100%; padding: 15px; margin: 10px 0; font-size: 18px; color: white; background: #007bff; border: none; border-radius: 8px; cursor: pointer; }
+        #canvas-container { width: 100%; height: 400px; background: #fff; border: 1px solid #ddd; }
+        .tag { display: inline-block; background: #e9ecef; padding: 5px 10px; border-radius: 15px; margin: 4px; }
+    </style>
+</head>
+<body>
+
+    <!-- 判斷是「電腦大螢幕(Host)」還是「手機投票(Guest)」 -->
+    <div id="host-view">
+        <div class="flex">
+            <div class="card qr-card">
+                <h3>📱 掃碼投票</h3>
+                <div id="qrcode" style="display:flex; justify-content:center;"></div>
+            </div>
+            <div class="card" style="flex:1;">
+                <h3>⚙️ 選項管理</h3>
+                <input type="text" id="new-opt" placeholder="輸入新選項">
+                <button onclick="addOption()">新增</button>
+                <button onclick="resetVotes()" style="color:red; margin-left:10px;">重置票數</button>
+                <div id="options-list" style="margin-top: 10px;"></div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>☁️ 即時票選文字雲</h3>
+            <div id="canvas-container">
+                <canvas id="cloud-canvas" width="850" height="400"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div id="guest-view" style="display:none;" class="card">
+        <h2>請選擇一項進行投票</h2>
+        <div id="vote-buttons"></div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const hostId = urlParams.get('host');
+
+        // 資料狀態
+        let options = ["台灣", "日本", "韓國"];
+        let votes = {"台灣": 0, "日本": 0, "韓國": 0};
+
+        if (!hostId) {
+            // === 主控台模式 (電腦大螢幕) ===
+            const peer = new Peer();
+
+            peer.on('open', (id) => {
+                const voteUrl = `${window.location.origin}${window.location.pathname}?host=${id}`;
+                new QRCode(document.getElementById("qrcode"), { text: voteUrl, width: 160, height: 160 });
+            });
+
+            // 監聽手機連線與投票
+            peer.on('connection', (conn) => {
+                conn.on('open', () => {
+                    conn.send({ type: 'INIT', options });
+                });
+                conn.on('data', (data) => {
+                    if (data.type === 'VOTE' && votes[data.option] !== undefined) {
+                        votes[data.option]++;
+                        renderCloud();
+                    }
+                });
+            });
+
+            function renderCloud() {
+                // 更新選項目錄
+                document.getElementById('options-list').innerHTML = options.map(opt => 
+                    `<span class="tag">${opt} (${votes[opt]||0}票)</span>`
+                ).join('');
+
+                // 繪製文字雲
+                const cloudData = options.map(opt => [opt, (votes[opt] || 0) * 15 + 15]);
+                WordCloud(document.getElementById('cloud-canvas'), {
+                    list: cloudData, gridSize: 8, weightFactor: 1, color: 'random-dark', rotateRatio: 0.2
+                });
+            }
+
+            function addOption() {
+                const val = document.getElementById('new-opt').value.trim();
+                if (val && !options.includes(val)) {
+                    options.push(val);
+                    votes[val] = 0;
+                    document.getElementById('new-opt').value = '';
+                    renderCloud();
+                }
+            }
+
+            function resetVotes() {
+                options.forEach(o => votes[o] = 0);
+                renderCloud();
+            }
+
+            window.onload = renderCloud;
+
+        } else {
+            // === 投票頁面模式 (手機端) ===
+            document.getElementById('host-view').style.display = 'none';
+            document.getElementById('guest-view').style.display = 'block';
+
+            const peer = new Peer();
+            let conn = null;
+
+            peer.on('open', () => {
+                conn = peer.connect(hostId);
+                conn.on('data', (data) => {
+                    if (data.type === 'INIT') {
+                        const container = document.getElementById('vote-buttons');
+                        container.innerHTML = data.options.map(opt => 
+                            `<button class="vote-btn" onclick="castVote('${opt}')">${opt}</button>`
+                        ).join('');
+                    }
+                });
+            });
+
+            function castVote(opt) {
+                if (conn) {
+                    conn.send({ type: 'VOTE', option: opt });
+                    alert(`已成功投給「${opt}」！`);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
